@@ -11,7 +11,7 @@ NC='\033[0m' # No Color
 # 版本和设置
 VERSION="1.0.0"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc"
+CONFIG_DIR="/etc/pfv"
 DATA_DIR="/var/lib/pfv"
 LOG_DIR="/var/log/pfv"
 REPO_URL="https://github.com/2bjx3ren/pfv.git" # 更换为实际仓库地址
@@ -21,7 +21,7 @@ DEFAULT_API_KEY="pfv-api-key-2023"
 # 检查脚本模式: 安装模式或管理模式
 PFV_BINARY="$INSTALL_DIR/pfv"
 PFV_ADMIN="$INSTALL_DIR/pfv.sh"
-PFV_CONFIG="$CONFIG_DIR/pfv.json"
+PFV_CONFIG="$CONFIG_DIR/pfv.conf"
 API_PORT="$DEFAULT_API_PORT"
 API_KEY="$DEFAULT_API_KEY"
 API_BASE="http://127.0.0.1:$API_PORT"
@@ -98,7 +98,7 @@ gb_to_bytes() {
 
 # 检查是否已安装
 check_installed() {
-    if [ ! -f "$FMV_BINARY" ] || [ ! -f "$FMV_CONFIG" ]; then
+    if [ ! -f "$PFV_BINARY" ] || [ ! -f "$PFV_CONFIG" ]; then
         return 1  # 未安装
     fi
     return 0  # 已安装
@@ -106,6 +106,13 @@ check_installed() {
 
 # 管理命令处理
 handle_command() {
+    # 加载API配置
+    if [ -f "$PFV_CONFIG" ]; then
+        API_PORT=$(grep -oP 'ApiPort\s*=\s*\K\d+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_PORT")
+        API_KEY=$(grep -oP 'ApiKey\s*=\s*\K[^\s]+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_KEY")
+        API_BASE="http://127.0.0.1:$API_PORT"
+    fi
+    
     case "$1" in
         add)
             check_port "$2"
@@ -148,7 +155,7 @@ handle_command() {
             sudo systemctl status pfv
             ;;
         uninstall)
-            echo "卸载FMV工具..."
+            echo "卸载PFV工具..."
             # 停止并禁用服务
             sudo systemctl stop pfv
             sudo systemctl disable pfv
@@ -514,7 +521,11 @@ create_config() {
     
     local api_port="$1"
     
-    # 创建配置文件
+    # 创建配置目录
+    sudo mkdir -p "$CONFIG_DIR"
+    sudo mkdir -p "$DATA_DIR"
+    
+    # 创建JSON配置文件
     cat > pfv.json << EOF
 {
   "ports": [],
@@ -525,7 +536,21 @@ create_config() {
   "api_key": "$DEFAULT_API_KEY"
 }
 EOF
+    
+    # 创建INI风格的配置文件
+    cat > pfv.conf << EOF
+# PFV配置文件
+ApiPort = $api_port
+ApiKey = $DEFAULT_API_KEY
+LogPath = $LOG_DIR/pfv.log
+DataPath = $DATA_DIR/pfv.json
+Threshold = 21474836480
+EOF
 
+    # 复制配置文件到安装目录
+    sudo cp pfv.json "$DATA_DIR/pfv.json"
+    sudo cp pfv.conf "$PFV_CONFIG"
+    
     log_info "配置文件已创建"
 }
 
@@ -543,7 +568,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=$INSTALL_DIR/pfv -config $CONFIG_DIR/pfv.json
+ExecStart=$INSTALL_DIR/pfv.bin -config $CONFIG_DIR/pfv.json
 Restart=on-failure
 RestartSec=10
 ReadWritePaths=/var/run $DATA_DIR $LOG_DIR
@@ -563,7 +588,7 @@ install_files() {
     sudo mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
     
     # 复制文件
-    sudo cp pfv "$INSTALL_DIR/pfv"
+    sudo cp pfv "$INSTALL_DIR/pfv.bin"
     sudo cp pfv.json "$CONFIG_DIR/pfv.json"
     sudo cp pfv.service /etc/systemd/system/pfv.service
     
@@ -581,8 +606,22 @@ install_files() {
         sudo chmod +x "$PFV_ADMIN"
     fi
     
-    # 设置权限
+    # 创建pfv命令脚本
+    log_info "创建pfv命令..."
+    cat > pfv_cmd << 'EOF'
+#!/bin/bash
+# PFV命令行工具
+
+# 调用pfv.sh并传递所有参数
+/usr/local/bin/pfv.sh "$@"
+EOF
+    
+    # 安装到系统
+    sudo cp pfv_cmd "$INSTALL_DIR/pfv"
     sudo chmod +x "$INSTALL_DIR/pfv"
+    
+    # 设置权限
+    sudo chmod +x "$INSTALL_DIR/pfv.bin"
     
     log_info "文件安装完成"
 }
@@ -614,15 +653,16 @@ print_completion() {
     log_info "PFV端口流量监控工具安装完成!"
     echo ""
     echo -e "${GREEN}使用方法:${NC}"
-    echo "  端口管理: pfv.sh [命令] [参数]"
+    echo "  端口管理: pfv [命令] [参数]"
     echo "  查看日志: sudo tail -f $LOG_DIR/pfv.log"
     echo "  服务管理: sudo systemctl [start|stop|restart|status] pfv"
     echo ""
     echo -e "${GREEN}API端口:${NC} $DEFAULT_API_PORT"
     echo -e "${GREEN}API密钥:${NC} $DEFAULT_API_KEY"
-    echo -e "${YELLOW}未配置监控端口，请使用 'pfv.sh add [端口]' 命令添加端口${NC}"
+    echo -e "${YELLOW}未配置监控端口，请使用 'pfv add [端口]' 命令添加端口${NC}"
     echo ""
-    echo -e "${YELLOW}安装完成。使用 'pfv.sh add [端口] [阈值GB]' 添加监控端口。${NC}"
+    echo -e "${YELLOW}安装完成。使用 'pfv add [端口] [阈值GB]' 添加监控端口。${NC}"
+    echo -e "${YELLOW}您也可以使用 'pfv.sh' 代替 'pfv' 执行相同的命令。${NC}"
     echo ""
 }
 
@@ -692,6 +732,25 @@ install_pfv() {
 #####################################################
 # 主入口
 #####################################################
+
+# 显示帮助信息
+show_help() {
+    local cmd_name=$(basename "$0")
+    if [ "$cmd_name" = "pfv" ]; then
+        cmd_name="pfv"
+    fi
+    
+    echo -e "\n使用方法: $cmd_name [命令] [参数]\n"
+    echo -e "命令:"
+    echo -e "  install\t安装PFV工具"
+    echo -e "  uninstall\t卸载PFV工具"
+    echo -e "  add <端口> [阈值GB]\t添加端口到监控列表，可选阈值(GB)"
+    echo -e "  del <端口>\t从监控列表移除端口"
+    echo -e "  res <端口>\t重置端口的流量统计"
+    echo -e "  all\t\t显示所有端口的流量统计"
+    echo -e "  status\t显示PFV服务状态"
+    echo -e "  help\t\t显示此帮助信息\n"
+}
 
 # 主函数 - 根据命令或安装状态决定执行模式
 main() {
