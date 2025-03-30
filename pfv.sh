@@ -108,8 +108,22 @@ check_installed() {
 handle_command() {
     # 加载API配置
     if [ -f "$PFV_CONFIG" ]; then
-        API_PORT=$(grep -oP 'ApiPort\s*=\s*\K\d+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_PORT")
-        API_KEY=$(grep -oP 'ApiKey\s*=\s*\K[^\s]+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_KEY")
+        # 判断是否是JSON格式
+        if grep -q "api_port" "$PFV_CONFIG"; then
+            # JSON格式
+            API_PORT=$(grep -o '"api_port":[^,}]*' "$PFV_CONFIG" | cut -d':' -f2 | tr -d ' ' || echo "$DEFAULT_API_PORT")
+            API_KEY=$(grep -o '"api_key":[^,}]*' "$PFV_CONFIG" | cut -d':' -f2 | tr -d ' "' || echo "$DEFAULT_API_KEY")
+        else
+            # INI格式
+            API_PORT=$(grep -oP 'ApiPort\s*=\s*\K\d+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_PORT")
+            API_KEY=$(grep -oP 'ApiKey\s*=\s*\K[^\s]+' "$PFV_CONFIG" 2>/dev/null || echo "$DEFAULT_API_KEY")
+        fi
+        API_BASE="http://127.0.0.1:$API_PORT"
+        echo "使用API配置: 端口=$API_PORT, 密钥=$API_KEY"
+    else
+        echo "未找到配置文件: $PFV_CONFIG, 使用默认配置"
+        API_PORT="$DEFAULT_API_PORT"
+        API_KEY="$DEFAULT_API_KEY"
         API_BASE="http://127.0.0.1:$API_PORT"
     fi
     
@@ -130,8 +144,17 @@ handle_command() {
             fi
             
             # 调用API，传入字节值
-            curl -s -X POST -H "X-API-Key: $API_KEY" "$API_BASE/add/$2?threshold=$bytes_threshold"
-            echo ""
+            echo "发送API请求到: $API_BASE/add/$2?threshold=$bytes_threshold"
+            response=$(curl -s -v -X POST -H "X-API-Key: $API_KEY" "$API_BASE/add/$2?threshold=$bytes_threshold" 2>&1)
+            echo "响应: $response"
+            
+            # 等待几秒让数据保存
+            echo "等待数据保存..."
+            sleep 2
+            
+            # 检查数据文件
+            echo "数据文件内容:"
+            sudo cat "$DATA_DIR/pfv.json"
             ;;
         del)
             check_port "$2"
@@ -147,7 +170,12 @@ handle_command() {
             ;;
         all)
             echo "所有端口的流量统计:"
-            curl -s -H "X-API-Key: $API_KEY" "$API_BASE/stats"
+            response=$(curl -s -v -H "X-API-Key: $API_KEY" "$API_BASE/stats" 2>&1)
+            echo "$response"
+            
+            # 检查数据文件
+            echo "数据文件内容:"
+            sudo cat "$DATA_DIR/pfv.json"
             echo ""
             ;;
         status)
