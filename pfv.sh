@@ -201,15 +201,112 @@ check_requirements() {
         exit 1
     fi
     
-    # 检查必要的工具
+    # 检查必要的工具，但不立即退出，而是尝试自动安装
+    local missing_tools=()
     for cmd in curl tar gcc make; do
         if ! command -v $cmd &> /dev/null; then
-            log_error "未找到$cmd命令，请先安装"
-            exit 1
+            missing_tools+=("$cmd")
         fi
     done
     
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_warn "缺少必要工具: ${missing_tools[*]}"
+        log_info "尝试自动安装缺失工具..."
+        install_missing_tools "${missing_tools[@]}"
+    fi
+    
     log_info "系统要求检查通过"
+}
+
+# 手动安装Golang
+install_golang_manually() {
+    log_info "尝试手动安装Go..."
+    
+    # 下载Go
+    local go_version="1.20.5"
+    local os_arch="linux-amd64"
+    local go_url="https://golang.org/dl/go${go_version}.${os_arch}.tar.gz"
+    local temp_dir=$(mktemp -d)
+    
+    log_info "下载Go ${go_version}..."
+    if ! curl -L -o "${temp_dir}/go.tar.gz" "${go_url}"; then
+        log_error "Go下载失败"
+        rm -rf "${temp_dir}"
+        return 1
+    fi
+    
+    # 安装Go
+    log_info "安装Go..."
+    sudo rm -rf /usr/local/go
+    sudo tar -C /usr/local -xzf "${temp_dir}/go.tar.gz"
+    rm -rf "${temp_dir}"
+    
+    # 添加到PATH
+    if ! grep -q "/usr/local/go/bin" /etc/profile; then
+        echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile
+    fi
+    
+    # 将Go添加到当前会话的PATH
+    export PATH=$PATH:/usr/local/go/bin
+    
+    # 验证安装
+    if command -v go &> /dev/null; then
+        log_info "Go安装成功"
+        return 0
+    else
+        log_error "Go安装失败"
+        return 1
+    fi
+}
+
+# 安装缺失的工具
+install_missing_tools() {
+    local tools=("$@")
+    local package_manager=""
+    local packages=()
+    
+    # 检测包管理器
+    if command -v apt-get &> /dev/null; then
+        package_manager="apt-get"
+        sudo apt-get update
+    elif command -v yum &> /dev/null; then
+        package_manager="yum"
+    elif command -v dnf &> /dev/null; then
+        package_manager="dnf"
+    else
+        log_warn "未找到支持的包管理器，请手动安装缺失的工具: ${tools[*]}"
+        exit 1
+    fi
+    
+    # 根据工具名映射到包名
+    for tool in "${tools[@]}"; do
+        case "$tool" in
+            gcc)
+                if [ "$package_manager" = "apt-get" ]; then
+                    packages+=("build-essential")
+                else
+                    packages+=("gcc")
+                fi
+                ;;
+            *)
+                packages+=("$tool")
+                ;;
+        esac
+    done
+    
+    # 安装缺失的工具
+    if [ ${#packages[@]} -gt 0 ]; then
+        log_info "安装缺失的工具: ${packages[*]}"
+        sudo $package_manager install -y "${packages[@]}"
+        
+        # 验证安装是否成功
+        for tool in "${tools[@]}"; do
+            if ! command -v $tool &> /dev/null; then
+                log_error "工具 $tool 安装失败，请手动安装"
+                exit 1
+            fi
+        done
+    fi
 }
 
 # 安装依赖
@@ -230,6 +327,12 @@ install_dependencies() {
     fi
     
     # 检查Go版本
+    if ! command -v go &> /dev/null; then
+        log_warn "Go安装失败，尝试使用备用方法安装..."
+        install_golang_manually
+    fi
+    
+    # 再次检查Go是否安装成功
     if ! command -v go &> /dev/null; then
         log_error "Go安装失败，请手动安装"
         exit 1
@@ -292,21 +395,74 @@ get_source() {
         local temp_dir=$(mktemp -d)
         cd "$temp_dir"
         
-        git clone "$REPO_URL" .
-        if [ $? -ne 0 ]; then
-            log_error "源代码获取失败"
-            exit 1
+        # 尝试使用git克隆
+        if command -v git &> /dev/null; then
+            log_info "使用git克隆仓库..."
+            git clone "$REPO_URL" .
+            if [ $? -eq 0 ]; then
+                log_info "git克隆成功"
+            else
+                log_warn "git克隆失败，尝试直接下载..."
+                download_source_directly
+            fi
+        else
+            # 如果没有git，直接下载
+            log_warn "未找到git，尝试直接下载源代码..."
+            download_source_directly
         fi
     fi
     
+    # 检查源文件是否存在
+    if [ ! -f "pfv.go" ]; then
+        log_error "源文件pfv.go不存在，获取源代码失败"
+        exit 1
+    fi
+    
     log_info "源代码准备完成"
+}
+
+# 直接下载源代码
+download_source_directly() {
+    local repo_owner="2bjx3ren"
+    local repo_name="pfv"
+    local branch="main"
+    local file="pfv.go"
+    
+    log_info "直接下载源文件..."
+    
+    # 下载主要源文件
+    curl -s -o "$file" "https://raw.githubusercontent.com/${repo_owner}/${repo_name}/${branch}/${file}"
+    
+    # 下载其他必要文件
+    curl -s -o "go.mod" "https://raw.githubusercontent.com/${repo_owner}/${repo_name}/${branch}/go.mod" 2>/dev/null || true
+    curl -s -o "go.sum" "https://raw.githubusercontent.com/${repo_owner}/${repo_name}/${branch}/go.sum" 2>/dev/null || true
+    
+    if [ ! -f "$file" ]; then
+        log_error "源文件下载失败"
+        return 1
+    fi
+    
+    log_info "源文件下载成功"
+    return 0
 }
 
 # 编译代码
 build_code() {
     log_info "编译代码..."
     
+    # 检查源文件是否存在
+    if [ ! -f "pfv.go" ]; then
+        log_error "源文件 pfv.go 不存在"
+        exit 1
+    fi
+    
+    # 检查依赖并下载
+    log_info "检查依赖..."
+    go mod init pfv 2>/dev/null || true
+    go mod tidy
+    
     # 使用Go构建
+    log_info "构建二进制文件..."
     go build -o pfv pfv.go
     
     if [ $? -ne 0 ] || [ ! -f "pfv" ]; then
