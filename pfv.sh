@@ -21,7 +21,7 @@ DEFAULT_API_KEY="pfv-api-key-2023"
 # 检查脚本模式: 安装模式或管理模式
 PFV_BINARY="$INSTALL_DIR/pfv"
 PFV_ADMIN="$INSTALL_DIR/pfv.sh"
-PFV_CONFIG="$CONFIG_DIR/pfv.conf"
+PFV_CONFIG="$CONFIG_DIR/pfv.json"
 API_PORT="$DEFAULT_API_PORT"
 API_KEY="$DEFAULT_API_KEY"
 API_BASE="http://127.0.0.1:$API_PORT"
@@ -537,19 +537,9 @@ create_config() {
 }
 EOF
     
-    # 创建INI风格的配置文件
-    cat > pfv.conf << EOF
-# PFV配置文件
-ApiPort = $api_port
-ApiKey = $DEFAULT_API_KEY
-LogPath = $LOG_DIR/pfv.log
-DataPath = $DATA_DIR/pfv.json
-Threshold = 21474836480
-EOF
-
     # 复制配置文件到安装目录
     sudo cp pfv.json "$DATA_DIR/pfv.json"
-    sudo cp pfv.conf "$PFV_CONFIG"
+    sudo cp pfv.json "$PFV_CONFIG"
     
     log_info "配置文件已创建"
 }
@@ -568,7 +558,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=$INSTALL_DIR/pfv.bin -config $CONFIG_DIR/pfv.json
+ExecStart=$INSTALL_DIR/pfv.bin -config $PFV_CONFIG
 Restart=on-failure
 RestartSec=10
 ReadWritePaths=/var/run $DATA_DIR $LOG_DIR
