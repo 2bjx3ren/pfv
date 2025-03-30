@@ -324,7 +324,17 @@ install_missing_tools() {
 
 # 安装依赖
 install_dependencies() {
-    log_info "安装依赖..."
+    log_info "安装Go编译环境..."
+    
+    # 检查Go是否已安装
+    if command -v go &> /dev/null; then
+        go_version=$(go version | awk '{print $3}' | sed 's/go//')
+        log_info "Go版本: $go_version"
+        return 0
+    fi
+    
+    # 如果没有安装Go，则安装
+    log_info "未找到Go环境，开始安装..."
     
     # 检测包管理器
     if command -v apt-get &> /dev/null; then
@@ -335,21 +345,18 @@ install_dependencies() {
     elif command -v dnf &> /dev/null; then
         sudo dnf install -y golang git gcc
     else
-        log_warn "未找到支持的包管理器，请手动安装Go和Git"
-        exit 1
-    fi
-    
-    # 检查Go版本
-    if ! command -v go &> /dev/null; then
-        log_warn "Go安装失败，尝试使用备用方法安装..."
+        log_warn "未找到支持的包管理器，尝试使用备用方法安装Go..."
         install_golang_manually
     fi
     
     # 再次检查Go是否安装成功
     if ! command -v go &> /dev/null; then
-        log_error "Go安装失败，请手动安装"
+        log_error "Go安装失败，请手动安装或使用预编译的二进制文件"
         exit 1
     fi
+    
+    go_version=$(go version | awk '{print $3}' | sed 's/go//')
+    log_info "Go版本: $go_version"
     
     GO_VERSION=$(go version | awk '{print $3}')
     log_info "Go版本: $GO_VERSION"
@@ -704,14 +711,20 @@ install_pfv() {
     check_requirements
     install_firewalld
     
-    # 如果提供了源代码目录，则需要编译，否则可以直接下载预编译的二进制文件
+    # 如果提供了源代码目录，则需要编译
     if [ -n "$source_dir" ]; then
+        log_info "使用源代码目录进行编译..."
         install_dependencies
         get_source "$source_dir"
         build_code
     else
-        # 尝试直接获取预编译的二进制文件，如果失败则回退到编译模式
-        if ! get_prebuilt_binary; then
+        # 首先尝试直接获取预编译的二进制文件
+        log_info "尝试使用预编译的二进制文件..."
+        if get_prebuilt_binary; then
+            log_info "成功使用预编译的二进制文件，跳过编译步骤"
+        else
+            # 如果预编译文件不可用，则回退到编译模式
+            log_warn "预编译的二进制文件不可用，将使用源代码编译"
             install_dependencies
             get_source ""
             build_code
