@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -43,7 +44,7 @@ type PfvConfig struct {
 
 // 加载配置文件
 func loadPfvConfig(configPath string) (*PfvConfig, error) {
-	data, err := os.ReadFile(configPath)
+	data, err := ioutil.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %v", err)
 	}
@@ -121,7 +122,7 @@ func (s *PfvStorage) SaveToFile(filePath string) error {
 
 	// 使用临时文件和原子操作避免数据损坏
 	tmpFile := filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	if err := ioutil.WriteFile(tmpFile, data, 0644); err != nil {
 		return fmt.Errorf("写入临时文件失败: %v", err)
 	}
 
@@ -149,7 +150,7 @@ func (s *PfvStorage) LoadFromFile(filePath string) error {
 		return nil
 	}
 
-	data, err := os.ReadFile(filePath)
+	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("读取文件失败: %v", err)
 	}
@@ -297,7 +298,7 @@ func getPfvPortTraffic(port int) (uint64, uint64, error) {
 
 	// 使用更可靠的/proc/net/tcp和/proc/net/udp解析网络流量
 	// 首先尝试从/proc文件系统读取
-	procTcp, err := os.ReadFile("/proc/net/tcp")
+	procTcp, err := ioutil.ReadFile("/proc/net/tcp")
 	if err != nil {
 		pfvLogger.Printf("读取/proc/net/tcp失败: %v", err)
 		// 继续执行，尝试其他方法
@@ -332,7 +333,7 @@ func getPfvPortTraffic(port int) (uint64, uint64, error) {
 	}
 
 	// 读取UDP统计
-	procUdp, err := os.ReadFile("/proc/net/udp")
+	procUdp, err := ioutil.ReadFile("/proc/net/udp")
 	if err != nil {
 		pfvLogger.Printf("读取/proc/net/udp失败: %v", err)
 		// 继续执行，尝试其他方法
