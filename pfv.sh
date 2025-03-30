@@ -446,9 +446,37 @@ download_source_directly() {
     return 0
 }
 
+# 获取预编译的二进制文件
+get_prebuilt_binary() {
+    log_info "尝试下载预编译的二进制文件..."
+    
+    local repo_owner="2bjx3ren"
+    local repo_name="pfv"
+    local arch="amd64"
+    local binary_url="https://github.com/${repo_owner}/${repo_name}/releases/latest/download/pfv-linux-${arch}"
+    
+    # 下载二进制文件
+    if curl -L -o "pfv" "${binary_url}" && [ -f "pfv" ]; then
+        # 设置执行权限
+        chmod +x "pfv"
+        log_info "预编译二进制文件下载成功"
+        return 0
+    else
+        log_warn "预编译二进制文件下载失败，将尝试从源代码编译"
+        return 1
+    fi
+}
+
 # 编译代码
 build_code() {
-    log_info "编译代码..."
+    log_info "准备二进制文件..."
+    
+    # 首先尝试下载预编译的二进制文件
+    if get_prebuilt_binary; then
+        return 0
+    fi
+    
+    log_info "从源代码编译..."
     
     # 检查源文件是否存在
     if [ ! -f "pfv.go" ]; then
@@ -621,10 +649,22 @@ install_pfv() {
     
     # 开始安装流程
     check_requirements
-    install_dependencies
     install_firewalld
-    get_source "$source_dir"
-    build_code
+    
+    # 如果提供了源代码目录，则需要编译，否则可以直接下载预编译的二进制文件
+    if [ -n "$source_dir" ]; then
+        install_dependencies
+        get_source "$source_dir"
+        build_code
+    else
+        # 尝试直接获取预编译的二进制文件，如果失败则回退到编译模式
+        if ! get_prebuilt_binary; then
+            install_dependencies
+            get_source ""
+            build_code
+        fi
+    fi
+    
     create_config "$api_port"
     create_service
     install_files
