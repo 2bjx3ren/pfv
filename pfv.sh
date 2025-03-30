@@ -157,17 +157,23 @@ handle_command() {
         uninstall)
             echo "卸载PFV工具..."
             # 停止并禁用服务
-            sudo systemctl stop pfv
-            sudo systemctl disable pfv
+            sudo systemctl stop pfv 2>/dev/null || true
+            sudo systemctl disable pfv 2>/dev/null || true
             log_info "PFV服务已停止并禁用"
             
             # 删除文件
             sudo rm -f "$INSTALL_DIR/pfv"
-            sudo rm -f "$CONFIG_DIR/pfv.json"
+            sudo rm -f "$INSTALL_DIR/pfv.bin"
+            sudo rm -f "$INSTALL_DIR/pfv_cmd"
+            sudo rm -f "$PFV_ADMIN"
+            sudo rm -f "$PFV_CONFIG"
             sudo rm -f "/etc/systemd/system/pfv.service"
+            sudo systemctl daemon-reload
+            sudo rm -rf "$CONFIG_DIR"
             sudo rm -rf "$DATA_DIR"
             sudo rm -rf "$LOG_DIR"
             log_info "PFV文件已删除"
+            echo -e "${GREEN}PFV工具已成功卸载!${NC}"
             
             # 重新加载systemd
             sudo systemctl daemon-reload
