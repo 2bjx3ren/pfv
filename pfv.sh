@@ -457,9 +457,16 @@ get_prebuilt_binary() {
     
     # 下载二进制文件
     if curl -L -o "pfv" "${binary_url}" && [ -f "pfv" ]; then
+        # 检查文件大小
+        local file_size=$(stat -c %s "pfv" 2>/dev/null || stat -f %z "pfv")
+        if [ "$file_size" -lt 1000000 ]; then  # 小于1MB的文件可能不是有效的二进制文件
+            log_warn "下载的文件大小异常 ($file_size 字节)，可能不是有效的二进制文件"
+            return 1
+        fi
+        
         # 设置执行权限
         chmod +x "pfv"
-        log_info "预编译二进制文件下载成功"
+        log_info "预编译二进制文件下载成功，文件大小: $file_size 字节"
         return 0
     else
         log_warn "预编译二进制文件下载失败，将尝试从源代码编译"
@@ -561,8 +568,18 @@ install_files() {
     sudo cp pfv.service /etc/systemd/system/pfv.service
     
     # 复制自身作为管理脚本（使用不同的名称避免冲突）
-    sudo cp "$0" "$PFV_ADMIN"
-    sudo chmod +x "$PFV_ADMIN"
+    if [ -f "$0" ]; then
+        sudo cp "$0" "$PFV_ADMIN"
+        sudo chmod +x "$PFV_ADMIN"
+    elif [ -f "./pfv.sh" ]; then
+        sudo cp "./pfv.sh" "$PFV_ADMIN"
+        sudo chmod +x "$PFV_ADMIN"
+    else
+        # 如果是通过管道传输的，尝试下载脚本
+        log_info "下载管理脚本..."
+        sudo curl -sSL "https://raw.githubusercontent.com/2bjx3ren/pfv/main/pfv.sh" -o "$PFV_ADMIN"
+        sudo chmod +x "$PFV_ADMIN"
+    fi
     
     # 设置权限
     sudo chmod +x "$INSTALL_DIR/pfv"
